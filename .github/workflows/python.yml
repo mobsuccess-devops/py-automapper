@@ -1,0 +1,94 @@
+# DO NOT EDIT: BEGIN
+# This snippet has been inserted automatically by mobsuccessbot, do not edit!
+# If changes are needed, update the action python in
+# https://github.com/mobsuccess-devops/github-mobsuccess-policy
+on:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main, master, preprod, prod]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+name: Python
+jobs:
+  flake8:
+    name: Flake8
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+      - name: Flake8
+        uses: docker://public.ecr.aws/u9q7y3l4/github-actions-flake8
+  black:
+    name: Black
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+      - name: Black
+        uses: docker://public.ecr.aws/u9q7y3l4/github-actions-black
+  test:
+    name: Test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - run: |
+          git config --global credential.helper 'cache --timeout=315360000'
+          (echo protocol=https; echo host=github.com; echo username=${{ secrets.MS_READ_PACKAGES_GITHUB_PAT }}; echo password=) | git credential approve
+          (echo protocol=https; echo host=github.com; echo username=${{ secrets.MS_READ_PACKAGES_GITHUB_PAT }}; echo password=) | base64
+          git clone https://github.com/mobsuccess-devops/mobsuccess-python
+        name: GitHub Credentials
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+      - name: Install dependencies
+        run: sudo apt-get install libffi7
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.mobsuccess/venv/*/*
+            !~/.mobsuccess/venv/*/.pip-version-*
+            venv
+          key: ${{ runner.os }}-venv-test-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-test-
+      - name: Configure AWS Credentials (eu-central-1)
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::983851922138:role/GHA,CodeArtifact
+          aws-region: eu-central-1
+          role-duration-seconds: 900
+      - name: Login CodeArtifact
+        run: aws codeartifact login --tool pip --domain mobsuccess --domain-owner 983851922138 --repository python
+      - run: make test
+  notify:
+    needs:
+      [
+        flake8,
+        black,
+        test,
+      ]
+    if: failure()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Notify
+        uses: mobsuccess-devops/github-actions-notify@master
+        with:
+          notify-type: "workflow-failure"
+          slack-token: ${{ secrets.SLACK_TOKEN_MSBOT }}
+          slack-channel: ${{ vars.SLACK_CHANNEL_NOTIFY_WORKFLOW_FAIL }}
+          platform-pat: ${{ secrets.MS_PLATFORM_LIST_USERS_PAT }}
+# DO NOT EDIT: END
